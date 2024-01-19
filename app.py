@@ -7,6 +7,7 @@ from langchain.llms import CTransformers
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.memory import ConversationBufferMemory
+from transformers import AutoTokenizer
 
 # Function to load documents 
 def load_documents():
@@ -14,9 +15,35 @@ def load_documents():
     documents = loader.load()
     return documents
 
+class TokenizedRecursiveCharacterTextSplitter(RecursiveCharacterTextSplitter):
+    def __init__(self, *args, **kwargs):
+        self.tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+        super().__init__(*args, **kwargs)
+
+    def split_document(self, document):
+        tokens = self.tokenizer.encode(document.page_content, add_special_tokens=False)
+        num_tokens = len(tokens)
+        chunk_size = min(self.chunk_size, num_tokens, 1280)  # Reduced chunk size
+        chunks = []
+        current_chunk = []
+        current_length = 0
+
+        for token in tokens:
+            if current_length + len(token.decode("utf-8")) > chunk_size:
+                chunks.append(" ".join(current_chunk))
+                current_chunk = [token.decode("utf-8")]
+                current_length = len(token.decode("utf-8"))
+            else:
+                current_chunk.append(token.decode("utf-8"))
+                current_length += len(token.decode("utf-8"))
+
+        if current_chunk:
+            chunks.append(" ".join(current_chunk))
+
+        return [Document(c) for c in chunks]
 # Function to split text into chunks
 def split_text_into_chunks(documents):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    text_splitter = TokenizedRecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
     text_chunks = text_splitter.split_documents(documents)
     return text_chunks
 
@@ -32,15 +59,12 @@ def create_vector_store(text_chunks, embeddings):
 
 # Function to create LLMS model
 def create_llms_model():
-    llm = CTransformers(model="mistral-7b-instruct-v0.1.Q4_K_M.gguf", config={'max_new_tokens': 128, 'temperature': 0.01})
+    llm = CTransformers(model="mistral-7b-instruct-v0.1.Q4_K_M.gguf", config={'max_new_tokens': 515, 'temperature': 0.01})
     return llm
 
 # Initialize Streamlit app
-st.title("Job Interview Prep ChatBot")
-st.title("Personalized Job Success Friend")
-st.markdown('<style>h1{color: orange; text-align: center;}</style>', unsafe_allow_html=True)
-st.subheader('Get Your Desired Job 💪')
-st.markdown('<style>h3{color: pink; text-align: center;}</style>', unsafe_allow_html=True)
+st.title("ChatBot")
+
 
 # loading of documents
 documents = load_documents()
@@ -56,6 +80,7 @@ vector_store = create_vector_store(text_chunks, embeddings)
 
 # Create LLMS model
 llm = create_llms_model()
+ 
 
 # Initialize conversation history
 if 'history' not in st.session_state:
@@ -87,7 +112,7 @@ container = st.container()
 
 with container:
     with st.form(key='my_form', clear_on_submit=True):
-        user_input = st.text_input("Question:", placeholder="Ask about your Job Interview", key='input')
+        user_input = st.text_input("Question:", placeholder="Ask anything relevant !! ", key='input')
         submit_button = st.form_submit_button(label='Send')
 
     if submit_button and user_input:
